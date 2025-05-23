@@ -111,7 +111,31 @@ export async function customFetchForOllamaWithCreds(
       statusText: response.statusText,
       headers: responseHeaders,
     });
-  } catch (error) {
+  } catch (error: any) {
+    console.error('[Codex CLI] Error in customFetchForOllamaWithCreds. Full error details:');
+    if (axios.isAxiosError(error)) {
+      console.error('Axios error object:', error.toJSON());
+      if (error.request) {
+        // Request object can be complex, avoid logging if it's too verbose or has sensitive data not already handled
+        // For now, let's log a marker that it exists
+        console.error('Axios error request object was present.'); 
+        // Example: console.error('Axios error request details:', error.request);
+      }
+      if (error.response) {
+        console.error('Axios error response status:', error.response.status);
+        console.error('Axios error response headers:', JSON.stringify(error.response.headers, null, 2));
+        // Attempt to stringify response data, but be mindful of large/binary data
+        try {
+          console.error('Axios error response data:', JSON.stringify(error.response.data, null, 2));
+        } catch (stringifyError) {
+          console.error('Axios error response data: (Could not stringify - potentially binary or very large)');
+        }
+      }
+    } else {
+      console.error('Non-Axios error:', error);
+    }
+
+    // Original error handling logic (converting to Response or re-throwing) follows...
     if (axios.isAxiosError(error) && error.response) {
       const errorResponse = error.response;
       const errorResponseHeaders = new Headers();
@@ -129,10 +153,8 @@ export async function customFetchForOllamaWithCreds(
         headers: errorResponseHeaders,
       });
     }
-    // For non-Axios errors or errors without a response, rethrow
-    // so it's not swallowed and can be handled by the OpenAI client or calling code.
-    // console.error('Error in customFetchForOllamaWithCreds:', error);
-    throw error;
+    // For non-Axios errors or errors without a response that wasn't converted above, rethrow.
+    throw error; 
   }
 }
 
