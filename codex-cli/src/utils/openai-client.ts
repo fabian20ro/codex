@@ -23,18 +23,38 @@ export async function customFetchForOllamaWithCreds(
   init?: RequestInit,
 ): Promise<Response> {
   const { method, headers, body, signal, ...restOfInit } = init || {};
+  const urlString = url.toString();
+  const parsedUrl = new URL(urlString);
+
+  let cleanUrlString = urlString;
+  let authOption: AxiosRequestConfig['auth'] = undefined;
+
+  if (parsedUrl.username || parsedUrl.password) {
+    const username = decodeURIComponent(parsedUrl.username);
+    const password = decodeURIComponent(parsedUrl.password); // Will be empty string if not present
+    authOption = { username, password };
+
+    // Reconstruct the URL without userinfo
+    parsedUrl.username = '';
+    parsedUrl.password = '';
+    cleanUrlString = parsedUrl.toString();
+  }
 
   // Type assertion for method, as Axios expects specific strings
   const axiosMethod = method as Method | undefined;
 
   const axiosConfig: AxiosRequestConfig = {
-    url: url.toString(),
+    url: cleanUrlString, // Use the potentially cleaned URL
     method: axiosMethod || 'GET', // Default to GET if method is not specified
     headers: headers as Record<string, string>, // Assuming headers is Record<string, string>
     data: body, // Axios uses 'data' for the request body
     signal: signal as AbortSignal, // Pass AbortSignal if present
     // timeout: /* map from init.timeout if necessary, though OpenAI client has its own timeout */
   };
+
+  if (authOption) {
+    axiosConfig.auth = authOption;
+  }
 
   // Handle streaming responses for Server-Sent Events (SSE)
   const acceptHeader = (headers as Record<string, string>)?.['Accept']?.toLowerCase();
@@ -43,9 +63,10 @@ export async function customFetchForOllamaWithCreds(
   }
 
   const customCaCertPath = process.env['OLLAMA_CUSTOM_CA_CERT_PATH'];
-  const targetUrl = new URL(url.toString()); // Parse the URL to check its protocol
+  // For CA decision, use the original URL's protocol
+  const caDecisionUrl = new URL(urlString); 
 
-  if (targetUrl.protocol === 'https:' && customCaCertPath) {
+  if (caDecisionUrl.protocol === 'https:' && customCaCertPath) {
     try {
       const caCert = fs.readFileSync(customCaCertPath);
       axiosConfig.httpsAgent = new https.Agent({ ca: caCert });
