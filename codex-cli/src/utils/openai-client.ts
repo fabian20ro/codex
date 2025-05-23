@@ -1,6 +1,8 @@
 import type { AppConfig } from "./config.js";
 import { URL } from "url";
 import axios, { AxiosError, AxiosRequestConfig, Method } from 'axios';
+import * as https from 'https';
+import * as fs from 'fs';
 
 import {
   getBaseUrl,
@@ -38,6 +40,28 @@ export async function customFetchForOllamaWithCreds(
   const acceptHeader = (headers as Record<string, string>)?.['Accept']?.toLowerCase();
   if (acceptHeader === 'text/event-stream') {
     axiosConfig.responseType = 'stream';
+  }
+
+  const customCaCertPath = process.env['OLLAMA_CUSTOM_CA_CERT_PATH'];
+  const targetUrl = new URL(url.toString()); // Parse the URL to check its protocol
+
+  if (targetUrl.protocol === 'https:' && customCaCertPath) {
+    try {
+      const caCert = fs.readFileSync(customCaCertPath);
+      axiosConfig.httpsAgent = new https.Agent({ ca: caCert });
+      // Advise against NODE_TLS_REJECT_UNAUTHORIZED=0 if possible,
+      // but the code itself doesn't set/unset it.
+      // Log a warning if NODE_TLS_REJECT_UNAUTHORIZED is set to 0, as it might interfere.
+      if (process.env['NODE_TLS_REJECT_UNAUTHORIZED'] === '0') {
+        console.warn('[Codex CLI] Warning: OLLAMA_CUSTOM_CA_CERT_PATH is set, but NODE_TLS_REJECT_UNAUTHORIZED is also set to 0. This may lead to unexpected behavior or bypass custom CA validation. It is recommended to remove NODE_TLS_REJECT_UNAUTHORIZED=0 when using a custom CA certificate.');
+      }
+    } catch (e: any) {
+      console.error(`[Codex CLI] Error: Could not read CA certificate file from OLLAMA_CUSTOM_CA_CERT_PATH at ${customCaCertPath}: ${e.message}`);
+      // Decide if we should throw the error or proceed without custom CA.
+      // Proceeding without it will likely cause a connection failure by default if the cert is self-signed.
+      // Throwing seems more appropriate to alert the user to a config issue.
+      throw new Error(`Failed to load CA certificate from ${customCaCertPath}: ${e.message}`);
+    }
   }
 
   try {
