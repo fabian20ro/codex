@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::BufRead;
 use std::path::Path;
+use url::Url;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -112,7 +113,14 @@ impl ModelClient {
     pub fn new(model: impl ToString, provider: ModelProviderInfo) -> Self {
         Self {
             model: model.to_string(),
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
+                .unwrap_or_else(|e| {
+                    warn!("Failed to build reqwest client: {}", e);
+                    // Fallback to default client if builder fails
+                    reqwest::Client::new()
+                }),
             provider,
         }
     }
@@ -198,8 +206,24 @@ impl ModelClient {
             stream: true,
         };
 
-        let base_url = self.provider.base_url.clone();
-        let base_url = base_url.trim_end_matches('/');
+        let base_url_str = self.provider.base_url.clone();
+        let (username, password) = match Url::parse(&base_url_str) {
+            Ok(parsed_url) => {
+                let user = parsed_url.username().to_string();
+                let pass = parsed_url.password().map(|p| p.to_string());
+                if !user.is_empty() {
+                    (Some(user), pass)
+                } else {
+                    (None, None)
+                }
+            }
+            Err(e) => {
+                warn!("Failed to parse base_url for credentials: {} - Url: {}", e, base_url_str);
+                (None, None)
+            }
+        };
+
+        let base_url = base_url_str.trim_end_matches('/');
         let url = format!("{}/responses", base_url);
         debug!(url, "POST");
         trace!("request payload: {}", serde_json::to_string(&payload)?);
@@ -214,15 +238,20 @@ impl ModelClient {
                     instructions: None,
                 })
             })?;
-            let res = self
+
+            let mut request_builder = self
                 .client
                 .post(&url)
-                .bearer_auth(api_key)
+                .bearer_auth(api_key.clone()) // Clone api_key if it's used later or take ownership
                 .header("OpenAI-Beta", "responses=experimental")
                 .header(reqwest::header::ACCEPT, "text/event-stream")
-                .json(&payload)
-                .send()
-                .await;
+                .json(&payload);
+
+            if let (Some(user), pass_opt) = (&username, &password) {
+                request_builder = request_builder.basic_auth(user, pass_opt.as_deref());
+            }
+            
+            let res = request_builder.send().await;
             match res {
                 Ok(resp) if resp.status().is_success() => {
                     let (tx_event, rx_event) = mpsc::channel::<Result<ResponseEvent>>(16);
@@ -423,4 +452,151 @@ async fn stream_from_fixture(path: impl AsRef<Path>) -> Result<ResponseStream> {
     let stream = ReaderStream::new(rdr).map_err(CodexErr::Io);
     tokio::spawn(process_sse(stream, tx_event));
     Ok(ResponseStream { rx_event })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client_common::Prompt;
+    use crate::model_provider_info::{ModelProviderInfo, WireApi};
+    use wiremock::matchers::{basic_auth, bearer_token, method, path, header_exists, not};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use std::collections::HashMap;
+
+    fn dummy_provider_info(base_url: String) -> ModelProviderInfo {
+        ModelProviderInfo {
+            name: "test_provider".to_string(),
+            model_aliases: HashMap::new(),
+            base_url,
+            wire_api: WireApi::Responses, // Assuming tests target stream_responses
+            env_key: None,
+            api_key_env_override: Some("dummy_api_key".to_string()),
+            azure_api_version: None,
+            supports_system_prompt: true,
+            supports_tools: true,
+            supports_reasoning: true,
+        }
+    }
+    
+    fn empty_sse_response() -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_string("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"test-id\"}}\n\n")
+    }
+
+    #[tokio::test]
+    async fn test_insecure_https_connection_allowed() {
+        let mock_server = MockServer::start_tls_self_signed().await;
+        Mock::given(method("POST"))
+            .and(path("/responses"))
+            .and(bearer_token("dummy_api_key")) // Ensure bearer token is still sent
+            .respond_with(empty_sse_response())
+            .mount(&mock_server)
+            .await;
+
+        let provider_info = dummy_provider_info(mock_server.uri());
+        let client = ModelClient::new("test-model", provider_info);
+        let prompt = Prompt::default();
+
+        let result = client.stream_responses(&prompt).await;
+        assert!(result.is_ok(), "Request should succeed with self-signed certificate. Error: {:?}", result.err());
+        
+        let requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1, "Mock server should have received one request.");
+    }
+
+    #[tokio::test]
+    async fn test_basic_authentication_correctly_sent() {
+        let mock_server = MockServer::start().await; // HTTP is fine for this test
+        Mock::given(method("POST"))
+            .and(path("/responses"))
+            .and(basic_auth("testuser", "testpass"))
+            .and(bearer_token("dummy_api_key"))
+            .respond_with(empty_sse_response())
+            .mount(&mock_server)
+            .await;
+
+        let base_url_with_creds = format!("http://testuser:testpass@{}", mock_server.address());
+        let provider_info = dummy_provider_info(base_url_with_creds);
+        let client = ModelClient::new("test-model", provider_info);
+        let prompt = Prompt::default();
+
+        let result = client.stream_responses(&prompt).await;
+        assert!(result.is_ok(), "Request should succeed with basic auth. Error: {:?}", result.err());
+
+        let requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1, "Mock server should have received one request with basic auth.");
+    }
+
+    #[tokio::test]
+    async fn test_no_credentials_no_basic_auth_header() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/responses"))
+            // Ensure NO basic auth header is present.
+            // Bearer token is still expected due to dummy_api_key.
+            .and(not(header_exists("Authorization")).or(bearer_token("dummy_api_key")))
+            .respond_with(empty_sse_response())
+            .mount(&mock_server)
+            .await;
+
+        let provider_info = dummy_provider_info(mock_server.uri());
+        let client = ModelClient::new("test-model", provider_info);
+        let prompt = Prompt::default();
+
+        let result = client.stream_responses(&prompt).await;
+        assert!(result.is_ok(), "Request should succeed without basic auth. Error: {:?}", result.err());
+        
+        let received_requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(received_requests.len(), 1);
+        // Check that if Authorization header exists, it's not basic auth
+        if let Some(auth_header_value) = received_requests[0].headers.get("Authorization") {
+            assert!(!auth_header_value.to_str().unwrap_or("").to_lowercase().starts_with("basic "), "Authorization header should not be Basic auth");
+        }
+    }
+    
+    #[tokio::test]
+    async fn test_basic_auth_username_only() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/responses"))
+            .and(basic_auth("useronly", "")) // Expect username with empty password
+            .and(bearer_token("dummy_api_key"))
+            .respond_with(empty_sse_response())
+            .mount(&mock_server)
+            .await;
+
+        let base_url_with_creds = format!("http://useronly@{}", mock_server.address());
+        let provider_info = dummy_provider_info(base_url_with_creds);
+        let client = ModelClient::new("test-model", provider_info);
+        let prompt = Prompt::default();
+
+        let result = client.stream_responses(&prompt).await;
+        assert!(result.is_ok(), "Request should succeed with username-only basic auth. Error: {:?}", result.err());
+
+        let requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1, "Mock server should have received one request.");
+    }
+
+    #[tokio::test]
+    async fn test_basic_auth_username_and_empty_password() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/responses"))
+            .and(basic_auth("useronly", "")) // Expect username with empty password
+            .and(bearer_token("dummy_api_key"))
+            .respond_with(empty_sse_response())
+            .mount(&mock_server)
+            .await;
+
+        // Format "username:@" for username and empty password
+        let base_url_with_creds = format!("http://useronly:@{}", mock_server.address());
+        let provider_info = dummy_provider_info(base_url_with_creds);
+        let client = ModelClient::new("test-model", provider_info);
+        let prompt = Prompt::default();
+
+        let result = client.stream_responses(&prompt).await;
+        assert!(result.is_ok(), "Request should succeed with username and empty password basic auth. Error: {:?}", result.err());
+
+        let requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1, "Mock server should have received one request.");
+    }
 }

@@ -86,23 +86,42 @@ export function setApiKey(apiKey: string): void {
 }
 
 export function getBaseUrl(provider: string = "openai"): string | undefined {
+  let urlStr: string | undefined;
+
   // Check for a PROVIDER-specific override: e.g. OPENAI_BASE_URL or OLLAMA_BASE_URL.
   const envKey = `${provider.toUpperCase()}_BASE_URL`;
   if (process.env[envKey]) {
-    return process.env[envKey];
+    urlStr = process.env[envKey];
+  } else {
+    // Get providers config from config file.
+    const config = loadConfig();
+    const providersConfig = config.providers ?? providers;
+    const providerInfo = providersConfig[provider.toLowerCase()];
+    if (providerInfo && providerInfo.baseURL) {
+      urlStr = providerInfo.baseURL;
+    } else if (OPENAI_BASE_URL !== "") {
+      // If the provider not found in the providers list and `OPENAI_BASE_URL` is set, use it.
+      urlStr = OPENAI_BASE_URL;
+    }
   }
 
-  // Get providers config from config file.
-  const config = loadConfig();
-  const providersConfig = config.providers ?? providers;
-  const providerInfo = providersConfig[provider.toLowerCase()];
-  if (providerInfo) {
-    return providerInfo.baseURL;
-  }
-
-  // If the provider not found in the providers list and `OPENAI_BASE_URL` is set, use it.
-  if (OPENAI_BASE_URL !== "") {
-    return OPENAI_BASE_URL;
+  if (urlStr) {
+    try {
+      const parsedURL = new URL(urlStr);
+      // Reconstruct the URL without username and password.
+      // host includes hostname and port. pathname includes the leading slash.
+      let reconstructedUrl = `${parsedURL.protocol}//${parsedURL.host}${parsedURL.pathname}`;
+      // Remove trailing slash if present, as some services are sensitive to it.
+      if (reconstructedUrl.endsWith('/')) {
+        reconstructedUrl = reconstructedUrl.slice(0, -1);
+      }
+      return reconstructedUrl;
+    } catch (error) {
+      log(`[codex] Warning: Malformed URL encountered in getBaseUrl: ${urlStr}. Error: ${error}`);
+      // Optionally, return the original malformed string or undefined.
+      // Returning undefined is safer to prevent further issues with a bad URL.
+      return undefined;
+    }
   }
 
   // We tried.
