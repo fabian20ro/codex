@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config.js";
+import { URL } from "url";
 
 import {
   getBaseUrl,
@@ -25,6 +26,9 @@ export function createOpenAIClient(
   config: OpenAIClientConfig | AppConfig,
 ): OpenAI | AzureOpenAI {
   const headers: Record<string, string> = {};
+  let processedBaseURL: string | undefined;
+  const baseURLString = getBaseUrl(config.provider);
+
   if (OPENAI_ORGANIZATION) {
     headers["OpenAI-Organization"] = OPENAI_ORGANIZATION;
   }
@@ -35,16 +39,45 @@ export function createOpenAIClient(
   if (config.provider?.toLowerCase() === "azure") {
     return new AzureOpenAI({
       apiKey: getApiKey(config.provider),
-      baseURL: getBaseUrl(config.provider),
+      baseURL: baseURLString,
       apiVersion: AZURE_OPENAI_API_VERSION,
       timeout: OPENAI_TIMEOUT_MS,
       defaultHeaders: headers,
     });
   }
 
+  processedBaseURL = baseURLString;
+
+  if (
+    config.provider?.toLowerCase() === "ollama" &&
+    baseURLString &&
+    baseURLString.includes("@")
+  ) {
+    const parsedUrl = new URL(baseURLString);
+    const username = parsedUrl.username;
+    const password = parsedUrl.password;
+
+    processedBaseURL =
+      parsedUrl.protocol +
+      "//" +
+      parsedUrl.host +
+      (parsedUrl.pathname === "/" ? "" : parsedUrl.pathname);
+
+    if (username) {
+      const basicAuthHeader =
+        "Basic " +
+        Buffer.from(
+          decodeURIComponent(username) +
+            ":" +
+            (password ? decodeURIComponent(password) : ""),
+        ).toString("base64");
+      headers["Authorization"] = basicAuthHeader;
+    }
+  }
+
   return new OpenAI({
     apiKey: getApiKey(config.provider),
-    baseURL: getBaseUrl(config.provider),
+    baseURL: processedBaseURL,
     timeout: OPENAI_TIMEOUT_MS,
     defaultHeaders: headers,
   });
