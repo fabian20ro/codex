@@ -21,6 +21,7 @@ import {
   AZURE_OPENAI_API_VERSION,
 } from "../config.js";
 import { log } from "../logger/log.js";
+import { createOpenAIClient } from "../openai-client.js";
 import { parseToolCallArguments } from "../parsers.js";
 import { responsesCreateViaChatCompletions } from "../responses.js";
 import {
@@ -304,59 +305,32 @@ export class AgentLoop {
 
     this.disableResponseStorage = disableResponseStorage ?? false;
     this.sessionId = getSessionId() || randomUUID().replaceAll("-", "");
-    // Configure OpenAI client with optional timeout (ms) from environment
-    const timeoutMs = OPENAI_TIMEOUT_MS;
-    const apiKey = this.config.apiKey ?? process.env["OPENAI_API_KEY"] ?? "";
-    const baseURL = getBaseUrl(this.provider);
-
-    console.log('[Codex CLI] AgentLoop constructor: About to create OpenAI/AzureOpenAI client directly.');
-    console.log('[Codex CLI] AgentLoop constructor: Provider:', this.provider);
-    console.log('[Codex CLI] AgentLoop constructor: Model:', this.model);
-    const effectiveApiKey = this.config.apiKey ?? process.env["OPENAI_API_KEY"] ?? "";
-    console.log('[Codex CLI] AgentLoop constructor: Effective API Key for constructor:', effectiveApiKey ? effectiveApiKey.substring(0, 5) + "..." : "Not set");
-    console.log('[Codex CLI] AgentLoop constructor: BaseURL for constructor:', getBaseUrl(this.provider));
-    console.log('[Codex CLI] AgentLoop constructor: disableResponseStorage:', this.disableResponseStorage);
-
-    this.oai = new OpenAI({
-      // The OpenAI JS SDK only requires `apiKey` when making requests against
-      // the official API.  When running unit‑tests we stub out all network
-      // calls so an undefined key is perfectly fine.  We therefore only set
-      // the property if we actually have a value to avoid triggering runtime
-      // errors inside the SDK (it validates that `apiKey` is a non‑empty
-      // string when the field is present).
-      ...(apiKey ? { apiKey } : {}),
-      baseURL,
-      defaultHeaders: {
-        originator: ORIGIN,
-        version: CLI_VERSION,
-        session_id: this.sessionId,
-        ...(OPENAI_ORGANIZATION
-          ? { "OpenAI-Organization": OPENAI_ORGANIZATION }
-          : {}),
-        ...(OPENAI_PROJECT ? { "OpenAI-Project": OPENAI_PROJECT } : {}),
-      },
-      httpAgent: PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined,
-      ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
-    });
-
-    if (this.provider.toLowerCase() === "azure") {
-      this.oai = new AzureOpenAI({
-        apiKey,
-        baseURL,
-        apiVersion: AZURE_OPENAI_API_VERSION,
-        defaultHeaders: {
-          originator: ORIGIN,
-          version: CLI_VERSION,
-          session_id: this.sessionId,
-          ...(OPENAI_ORGANIZATION
-            ? { "OpenAI-Organization": OPENAI_ORGANIZATION }
-            : {}),
-          ...(OPENAI_PROJECT ? { "OpenAI-Project": OPENAI_PROJECT } : {}),
-        },
-        httpAgent: PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined,
-        ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
-      });
+    
+    // Prepare the configuration for createOpenAIClient.
+    const clientConfigForCreation: AppConfig = {
+      ...this.config, // Spreads apiKey, model, instructions from this.config
+      provider: this.provider, // Ensure provider is explicitly passed from AgentLoop's state
+      // Model is part of this.config, but if AgentLoop's this.model could differ, ensure it's used:
+      model: this.model, 
+    };
+    
+    // For PROXY_URL, createOpenAIClient doesn't currently accept httpAgent.
+    // This is a limitation we accept for now to fix the main Ollama bug.
+    // Axios within customFetchForOllamaWithCreds will respect HTTPS_PROXY env var.
+    // The default OpenAI client path in createOpenAIClient might lose explicit proxy if PROXY_URL was the only way.
+    if (PROXY_URL && this.provider.toLowerCase() !== 'ollama') {
+        console.warn('[Codex CLI] AgentLoop: PROXY_URL is set, but createOpenAIClient does not explicitly pass httpAgent for non-Ollama providers yet. Standard HTTPS_PROXY env var might still work for those.');
     }
+
+    // The defaultHeaders like originator, version, session_id are an issue.
+    // createOpenAIClient sets its own. For now, we will lose AgentLoop's specific ones
+    // if they differ, to prioritize getting the correct client instance.
+    // This might need a follow-up to allow createOpenAIClient to merge additional default headers.
+    // Note: createOpenAIClient already includes OPENAI_ORGANIZATION and OPENAI_PROJECT from config.
+    
+    console.log('[Codex CLI] AgentLoop constructor: Now calling createOpenAIClient. Provider:', clientConfigForCreation.provider, 'Model:', clientConfigForCreation.model);
+    this.oai = createOpenAIClient(clientConfigForCreation);
+    console.log('[Codex CLI] AgentLoop constructor: Client received from createOpenAIClient.');
 
     setSessionId(this.sessionId);
     setCurrentModel(this.model);
