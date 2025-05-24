@@ -25,13 +25,23 @@ export async function customFetchForOllamaWithCreds(
 ): Promise<Response> {
   const { method, headers, body, signal, ...restOfInit } = init || {};
 
+  // Process headers to remove any existing Authorization header
+  const processedHeaders = { ...(headers as Record<string, string>) };
+  // Headers might be cased differently by the caller or OpenAI library.
+  if (processedHeaders['authorization']) {
+    delete processedHeaders['authorization'];
+  }
+  if (processedHeaders['Authorization']) {
+    delete processedHeaders['Authorization'];
+  }
+
   // Type assertion for method, as Axios expects specific strings
   const axiosMethod = method as Method | undefined;
 
   const axiosConfig: AxiosRequestConfig = {
     url: url.toString(), // url is now expected to be clean
     method: axiosMethod || 'GET', // Default to GET if method is not specified
-    headers: headers as Record<string, string>, // Assuming headers is Record<string, string>
+    headers: processedHeaders, // Use the processed headers
     data: body, // Axios uses 'data' for the request body
     signal: signal as AbortSignal, // Pass AbortSignal if present
     ...(creds && { auth: creds }), // Add auth property if creds are provided
@@ -39,7 +49,8 @@ export async function customFetchForOllamaWithCreds(
   };
 
   // Handle streaming responses for Server-Sent Events (SSE)
-  const acceptHeader = (headers as Record<string, string>)?.['Accept']?.toLowerCase();
+  const acceptHeader = (processedHeaders as Record<string, string>)?.['Accept']?.toLowerCase();
+  // const acceptHeader = (headers as Record<string, string>)?.['Accept']?.toLowerCase(); // This line is now redundant due to the change above.
   if (acceptHeader === 'text/event-stream') {
     axiosConfig.responseType = 'stream';
   }
