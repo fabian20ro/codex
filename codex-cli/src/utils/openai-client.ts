@@ -176,19 +176,47 @@ export function createOpenAIClient(
 
     // Define the closure that will call customFetchForOllamaWithCreds
     const fetcherForThisInstance = async (fetchUrl: RequestInfo, fetchInit?: RequestInit) => {
-      // The 'fetchUrl' from the OpenAI library will be based on cleanBaseURL + path.
-      // We pass this clean URL directly to customFetchForOllamaWithCreds.
-      // The credentials (username, password) are passed separately.
-      return customFetchForOllamaWithCreds(fetchUrl, fetchInit, { username, password });
+      // Use a helper for stringifying to avoid issues with circular refs or large objects
+      const safeJsonStringify = (obj: any) => {
+        try {
+          return JSON.stringify(obj, null, 2);
+        } catch (e) {
+          return `[Could not stringify: ${e.message}]`;
+        }
+      };
+
+      console.log('[Codex CLI] fetcherForThisInstance called. URL:', safeJsonStringify(fetchUrl));
+      // Be careful with logging full fetchInit if it might contain very large request bodies.
+      // For now, let's log its keys or a summary.
+      const initSummary = fetchInit ? { method: fetchInit.method, headers: fetchInit.headers, bodyIsPresent: !!fetchInit.body } : null;
+      console.log('[Codex CLI] fetcherForThisInstance init (summary):', safeJsonStringify(initSummary));
+      // Log captured credentials separately
+      console.log('[Codex CLI] fetcherForThisInstance credentials:', safeJsonStringify({ username, password })); // username, password from outer scope
+      
+      try {
+        const result = await customFetchForOllamaWithCreds(fetchUrl, fetchInit, { username, password });
+        console.log('[Codex CLI] fetcherForThisInstance: customFetchForOllamaWithCreds returned successfully.');
+        return result;
+      } catch (e: any) {
+        console.error('[Codex CLI] fetcherForThisInstance: caught error calling customFetchForOllamaWithCreds. Error:', e.message);
+        // Also log the detailed error if it's available from the previous step's enhancement in customFetchForOllamaWithCreds
+        // This might be redundant if customFetchForOllamaWithCreds already logs extensively, but can help trace.
+        if (e.isAxiosError) { // AxiosError might not be available directly on e, checking if customFetchForOllamaWithCreds adds it or if it's an AxiosError instance
+           console.error('[Codex CLI] fetcherForThisInstance: Axios error details (from rethrow):', e.toJSON ? e.toJSON() : 'No .toJSON() method');
+        }
+        throw e;
+      }
     };
     
-    return new OpenAI({
+    const client = new OpenAI({
       apiKey: getApiKey(config.provider),
       baseURL: cleanBaseURL, // Pass the clean URL here
       timeout: OPENAI_TIMEOUT_MS,
       defaultHeaders: headers,
       fetch: fetcherForThisInstance, // Pass the closure
     });
+    console.log('[Codex CLI] OpenAI client instance created with custom fetcher for Ollama. BaseURL for constructor: ' + cleanBaseURL);
+    return client;
   } else {
     // This 'else' block contains the existing logic for Azure and standard OpenAI/Ollama without creds
     if (config.provider?.toLowerCase() === "azure") {
