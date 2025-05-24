@@ -318,9 +318,7 @@ export class AgentLoop {
     // This is a limitation we accept for now to fix the main Ollama bug.
     // Axios within customFetchForOllamaWithCreds will respect HTTPS_PROXY env var.
     // The default OpenAI client path in createOpenAIClient might lose explicit proxy if PROXY_URL was the only way.
-    if (PROXY_URL && this.provider.toLowerCase() !== 'ollama') {
-        console.warn('[Codex CLI] AgentLoop: PROXY_URL is set, but createOpenAIClient does not explicitly pass httpAgent for non-Ollama providers yet. Standard HTTPS_PROXY env var might still work for those.');
-    }
+    // The console.warn for PROXY_URL has been removed.
 
     // The defaultHeaders like originator, version, session_id are an issue.
     // createOpenAIClient sets its own. For now, we will lose AgentLoop's specific ones
@@ -328,9 +326,8 @@ export class AgentLoop {
     // This might need a follow-up to allow createOpenAIClient to merge additional default headers.
     // Note: createOpenAIClient already includes OPENAI_ORGANIZATION and OPENAI_PROJECT from config.
     
-    console.log('[Codex CLI] AgentLoop constructor: Now calling createOpenAIClient. Provider:', clientConfigForCreation.provider, 'Model:', clientConfigForCreation.model);
+    // Removed diagnostic console.logs for createOpenAIClient call and reception.
     this.oai = createOpenAIClient(clientConfigForCreation);
-    console.log('[Codex CLI] AgentLoop constructor: Client received from createOpenAIClient.');
 
     setSessionId(this.sessionId);
     setCurrentModel(this.model);

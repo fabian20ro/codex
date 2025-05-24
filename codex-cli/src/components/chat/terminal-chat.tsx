@@ -83,9 +83,7 @@ async function generateCommandExplanation(
 ): Promise<string> {
   try {
     // Create a temporary OpenAI client
-    console.log('[Codex CLI] generateCommandExplanation: Creating OpenAI client. Config Provider:', config.provider, 'Model:', model);
     const oai = createOpenAIClient(config);
-    console.log('[Codex CLI] generateCommandExplanation: OpenAI client created.');
 
     // Format the command for display
     const commandForDisplay = formatCommandForDisplay(command);
@@ -245,7 +243,6 @@ export default function TerminalChat({
     agentRef.current?.terminate();
 
     const sessionId = crypto.randomUUID();
-    console.log('[Codex CLI] TerminalChat useEffect: Creating new AgentLoop. Model:', model, 'Provider:', provider, 'Config Instructions Present:', !!config.instructions, 'Config Provider:', config.provider, 'Approval Policy:', approvalPolicy);
     agentRef.current = new AgentLoop({
       model,
       provider,
@@ -311,7 +308,6 @@ export default function TerminalChat({
     forceUpdate();
 
     log(`AgentLoop created: ${inspect(agentRef.current, { depth: 1 })}`);
-    console.log('[Codex CLI] TerminalChat useEffect: New AgentLoop created.');
 
     return () => {
       log("terminating AgentLoop");
@@ -579,9 +575,7 @@ export default function TerminalChat({
               ]);
             }}
             submitInput={(inputs) => {
-              // Add safeJsonStringify if needed for inputs, or log selectively
-              const inputsSummary = Array.isArray(inputs) ? inputs.map(inp => ({ type: inp.type, contentSummary: inp.content?.substring(0,50) + '...' })) : inputs;
-              console.log('[Codex CLI] TerminalChatInput submitInput: agent.run called. Inputs (summary):', JSON.stringify(inputsSummary), 'LastResponseId:', lastResponseId || "");
+              // const inputsSummary = Array.isArray(inputs) ? inputs.map(inp => ({ type: inp.type, contentSummary: inp.content?.substring(0,50) + '...' })) : inputs; // Removed as log is removed
               agent.run(inputs, lastResponseId || "");
               return {};
             }}
