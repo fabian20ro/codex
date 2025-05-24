@@ -170,6 +170,11 @@ export type StoredConfig = {
    * terminal output.
    */
   fileOpener?: FileOpenerScheme;
+  ollamaTemperature?: number;
+  ollamaTopK?: number;
+  ollamaTopP?: number;
+  ollamaRepeatPenalty?: number;
+  ollamaMinP?: number;
 };
 
 // Minimal config written on first run.  An *empty* model string ensures that
@@ -215,6 +220,11 @@ export type AppConfig = {
     };
   };
   fileOpener?: FileOpenerScheme;
+  ollamaTemperature?: number;
+  ollamaTopK?: number;
+  ollamaTopP?: number;
+  ollamaRepeatPenalty?: number;
+  ollamaMinP?: number;
 };
 
 // Formatting (quiet mode-only).
@@ -522,6 +532,29 @@ export const loadConfig = (
 
   // Merge default providers with user configured providers in the config.
   config.providers = { ...providers, ...storedConfig.providers };
+
+  // Load Ollama sampling parameters from environment variables
+  const ollamaTemperature = process.env['OLLAMA_TEMPERATURE'] ? parseFloat(process.env['OLLAMA_TEMPERATURE']) : undefined;
+  const ollamaTopK = process.env['OLLAMA_TOP_K'] ? parseInt(process.env['OLLAMA_TOP_K'], 10) : undefined;
+  const ollamaTopP = process.env['OLLAMA_TOP_P'] ? parseFloat(process.env['OLLAMA_TOP_P']) : undefined;
+  const ollamaRepeatPenalty = process.env['OLLAMA_REPEAT_PENALTY'] ? parseFloat(process.env['OLLAMA_REPEAT_PENALTY']) : undefined;
+  const ollamaMinP = process.env['OLLAMA_MIN_P'] ? parseFloat(process.env['OLLAMA_MIN_P']) : undefined;
+
+  if (ollamaTemperature !== undefined && !isNaN(ollamaTemperature)) {
+    config.ollamaTemperature = ollamaTemperature;
+  }
+  if (ollamaTopK !== undefined && !isNaN(ollamaTopK)) {
+    config.ollamaTopK = ollamaTopK;
+  }
+  if (ollamaTopP !== undefined && !isNaN(ollamaTopP)) {
+    config.ollamaTopP = ollamaTopP;
+  }
+  if (ollamaRepeatPenalty !== undefined && !isNaN(ollamaRepeatPenalty)) {
+    config.ollamaRepeatPenalty = ollamaRepeatPenalty;
+  }
+  if (ollamaMinP !== undefined && !isNaN(ollamaMinP)) {
+    config.ollamaMinP = ollamaMinP;
+  }
 
   return config;
 };

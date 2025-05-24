@@ -791,8 +791,7 @@ export class AgentLoop {
               `instructions (length ${mergedInstructions.length}): ${mergedInstructions}`,
             );
 
-            // eslint-disable-next-line no-await-in-loop
-            stream = await responseCall({
+            const paramsForResponseCall: ResponseCreateParams = {
               model: this.model,
               instructions: mergedInstructions,
               input: turnInput,
@@ -807,12 +806,33 @@ export class AgentLoop {
                     previous_response_id: lastResponseId || undefined,
                   }),
               tools: tools,
-              // Explicitly tell the model it is allowed to pick whatever
-              // tool it deems appropriate.  Omitting this sometimes leads to
-              // the model ignoring the available tools and responding with
-              // plain text instead (resulting in a missing tool‑call).
               tool_choice: "auto",
-            });
+            };
+
+            if (this.provider.toLowerCase() === 'ollama') {
+              if (this.config.ollamaTemperature !== undefined && !isNaN(this.config.ollamaTemperature)) {
+                // @ts-expect-error - temperature might not be on ResponseCreateParams directly, but will pass to body
+                paramsForResponseCall.temperature = this.config.ollamaTemperature;
+              }
+              if (this.config.ollamaTopP !== undefined && !isNaN(this.config.ollamaTopP)) {
+                // @ts-expect-error - top_p might not be on ResponseCreateParams directly
+                paramsForResponseCall.top_p = this.config.ollamaTopP;
+              }
+              if (this.config.ollamaTopK !== undefined && !isNaN(this.config.ollamaTopK)) {
+                // @ts-expect-error - Ollama specific, will pass to body
+                paramsForResponseCall.top_k = this.config.ollamaTopK;
+              }
+              if (this.config.ollamaRepeatPenalty !== undefined && !isNaN(this.config.ollamaRepeatPenalty)) {
+                // @ts-expect-error - Ollama specific, will pass to body
+                paramsForResponseCall.repeat_penalty = this.config.ollamaRepeatPenalty;
+              }
+              if (this.config.ollamaMinP !== undefined && !isNaN(this.config.ollamaMinP)) {
+                // @ts-expect-error - Ollama specific, will pass to body
+                paramsForResponseCall.min_p = this.config.ollamaMinP;
+              }
+            }
+            // eslint-disable-next-line no-await-in-loop
+            stream = await responseCall(paramsForResponseCall);
             break;
           } catch (error) {
             const isTimeout = error instanceof APIConnectionTimeoutError;
@@ -1180,8 +1200,8 @@ export class AgentLoop {
                 "agentLoop.run(): responseCall(1): turnInput: " +
                   JSON.stringify(turnInput),
               );
-              // eslint-disable-next-line no-await-in-loop
-              stream = await responseCall({
+
+              const paramsForRetryResponseCall: ResponseCreateParams = {
                 model: this.model,
                 instructions: mergedInstructions,
                 input: turnInput,
@@ -1197,7 +1217,32 @@ export class AgentLoop {
                     }),
                 tools: tools,
                 tool_choice: "auto",
-              });
+              };
+
+              if (this.provider.toLowerCase() === 'ollama') {
+                if (this.config.ollamaTemperature !== undefined && !isNaN(this.config.ollamaTemperature)) {
+                  // @ts-expect-error
+                  paramsForRetryResponseCall.temperature = this.config.ollamaTemperature;
+                }
+                if (this.config.ollamaTopP !== undefined && !isNaN(this.config.ollamaTopP)) {
+                  // @ts-expect-error
+                  paramsForRetryResponseCall.top_p = this.config.ollamaTopP;
+                }
+                if (this.config.ollamaTopK !== undefined && !isNaN(this.config.ollamaTopK)) {
+                  // @ts-expect-error
+                  paramsForRetryResponseCall.top_k = this.config.ollamaTopK;
+                }
+                if (this.config.ollamaRepeatPenalty !== undefined && !isNaN(this.config.ollamaRepeatPenalty)) {
+                  // @ts-expect-error
+                  paramsForRetryResponseCall.repeat_penalty = this.config.ollamaRepeatPenalty;
+                }
+                if (this.config.ollamaMinP !== undefined && !isNaN(this.config.ollamaMinP)) {
+                  // @ts-expect-error
+                  paramsForRetryResponseCall.min_p = this.config.ollamaMinP;
+                }
+              }
+              // eslint-disable-next-line no-await-in-loop
+              stream = await responseCall(paramsForRetryResponseCall);
 
               this.currentStream = stream;
               // Continue to outer while to consume new stream.
