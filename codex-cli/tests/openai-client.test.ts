@@ -218,7 +218,7 @@ describe('customFetchForOllamaWithCreds', () => {
     expect(await response.text()).toBe(mockResponseData);
   });
   
-  it('should remove pre-existing Authorization header and use creds for auth', async () => {
+  it('should remove pre-existing Authorization header if creds are provided', async () => {
     mockAxios.mockResolvedValueOnce({ data: 'auth_override_success', status: 200, headers: {} });
     
     const cleanUrl = 'http://localhost/auth-override-test';
@@ -238,22 +238,42 @@ describe('customFetchForOllamaWithCreds', () => {
     expect(mockAxios).toHaveBeenCalledTimes(1);
     const axiosCallArgs = mockAxios.mock.calls[0][0];
     
-    // Check that Authorization header is removed (both casings)
     expect(axiosCallArgs.headers.Authorization).toBeUndefined();
     expect(axiosCallArgs.headers.authorization).toBeUndefined();
-    
-    // Check that other headers are preserved
     expect(axiosCallArgs.headers['Content-Type']).toBe('application/json');
     expect(axiosCallArgs.headers['X-Custom-Header']).toBe('keep-this');
-    
-    // Check that new auth from creds is used
     expect(axiosCallArgs.auth).toEqual(creds);
-    
-    // Check other parameters
     expect(axiosCallArgs.url).toBe(cleanUrl);
     expect(axiosCallArgs.method).toBe('POST');
     expect(axiosCallArgs.data).toBe(JSON.stringify({ data: 'payload' }));
   });
+
+  it('should preserve Authorization header if creds are NOT provided', async () => {
+    mockAxios.mockResolvedValueOnce({ data: 'auth_preserved_success', status: 200, headers: {} });
+    
+    const cleanUrl = 'http://localhost/auth-preserved-test';
+    const initHeaders = {
+      'Authorization': 'Bearer some-token-that-SHOULD-BE-PRESERVED',
+      'Content-Type': 'application/json',
+    };
+    // const creds = undefined; // Explicitly not providing creds
+    
+    await openaiClientModule.customFetchForOllamaWithCreds(
+      cleanUrl, 
+      { method: 'GET', headers: initHeaders }, 
+      undefined // creds argument is undefined
+    );
+
+    expect(mockAxios).toHaveBeenCalledTimes(1);
+    const axiosCallArgs = mockAxios.mock.calls[0][0];
+    
+    expect(axiosCallArgs.headers.Authorization).toBe('Bearer some-token-that-SHOULD-BE-PRESERVED');
+    expect(axiosCallArgs.headers['Content-Type']).toBe('application/json');
+    expect(axiosCallArgs.auth).toBeUndefined();
+    expect(axiosCallArgs.url).toBe(cleanUrl);
+    expect(axiosCallArgs.method).toBe('GET');
+  });
+
 
   it('should handle URI-encoded credentials passed via creds object (assuming they are pre-decoded by caller)', async () => {
     const mockResponseData = 'success_encoded_auth';
@@ -298,7 +318,7 @@ describe('customFetchForOllamaWithCreds', () => {
       url: cleanUrl,
       responseType: 'stream',
       auth: creds,
-      headers: { 'Accept': 'text/event-stream' }, // Authorization should not be here
+      headers: { 'Accept': 'text/event-stream' }, 
     }));
     expect(response.body).toBe(mockNodeReadableStream);
   });

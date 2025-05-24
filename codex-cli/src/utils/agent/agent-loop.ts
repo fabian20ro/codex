@@ -309,6 +309,14 @@ export class AgentLoop {
     const apiKey = this.config.apiKey ?? process.env["OPENAI_API_KEY"] ?? "";
     const baseURL = getBaseUrl(this.provider);
 
+    console.log('[Codex CLI] AgentLoop constructor: About to create OpenAI/AzureOpenAI client directly.');
+    console.log('[Codex CLI] AgentLoop constructor: Provider:', this.provider);
+    console.log('[Codex CLI] AgentLoop constructor: Model:', this.model);
+    const effectiveApiKey = this.config.apiKey ?? process.env["OPENAI_API_KEY"] ?? "";
+    console.log('[Codex CLI] AgentLoop constructor: Effective API Key for constructor:', effectiveApiKey ? effectiveApiKey.substring(0, 5) + "..." : "Not set");
+    console.log('[Codex CLI] AgentLoop constructor: BaseURL for constructor:', getBaseUrl(this.provider));
+    console.log('[Codex CLI] AgentLoop constructor: disableResponseStorage:', this.disableResponseStorage);
+
     this.oai = new OpenAI({
       // The OpenAI JS SDK only requires `apiKey` when making requests against
       // the official API.  When running unit‑tests we stub out all network

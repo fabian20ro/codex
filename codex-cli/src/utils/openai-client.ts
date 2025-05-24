@@ -23,34 +23,35 @@ export async function customFetchForOllamaWithCreds(
   init?: RequestInit,
   creds?: { username: string; password?: string } // New optional parameter for credentials
 ): Promise<Response> {
-  const { method, headers, body, signal, ...restOfInit } = init || {};
+  const { method, body, signal, ...restOfInit } = init || {};
+  const initialHeaders = { ...(init?.headers as Record<string, string>) };
+  let headersForAxios = initialHeaders;
 
-  // Process headers to remove any existing Authorization header
-  const processedHeaders = { ...(headers as Record<string, string>) };
-  // Headers might be cased differently by the caller or OpenAI library.
-  if (processedHeaders['authorization']) {
-    delete processedHeaders['authorization'];
-  }
-  if (processedHeaders['Authorization']) {
-    delete processedHeaders['Authorization'];
+  if (creds) {
+    // If we are using the 'auth' option in Axios (via 'creds'),
+    // we must remove any existing 'Authorization' header from the headers
+    // object to prevent conflicts or overrides. Axios's 'auth' option
+    // will generate the correct Basic Auth header.
+    headersForAxios = { ...initialHeaders }; // Clone to avoid modifying initialHeaders if not using creds
+    delete headersForAxios['authorization'];
+    delete headersForAxios['Authorization']; // Handle case variations
   }
 
   // Type assertion for method, as Axios expects specific strings
   const axiosMethod = method as Method | undefined;
 
   const axiosConfig: AxiosRequestConfig = {
-    url: url.toString(), // url is now expected to be clean
-    method: axiosMethod || 'GET', // Default to GET if method is not specified
-    headers: processedHeaders, // Use the processed headers
-    data: body, // Axios uses 'data' for the request body
-    signal: signal as AbortSignal, // Pass AbortSignal if present
-    ...(creds && { auth: creds }), // Add auth property if creds are provided
+    url: url.toString(), // This is the clean URL from the caller
+    method: axiosMethod || 'GET',
+    headers: headersForAxios, // Use the potentially modified headers
+    data: body,
+    signal: signal as AbortSignal,
+    ...(creds && { auth: creds }), // Axios handles Basic Auth via this
     // timeout: /* map from init.timeout if necessary, though OpenAI client has its own timeout */
   };
 
   // Handle streaming responses for Server-Sent Events (SSE)
-  const acceptHeader = (processedHeaders as Record<string, string>)?.['Accept']?.toLowerCase();
-  // const acceptHeader = (headers as Record<string, string>)?.['Accept']?.toLowerCase(); // This line is now redundant due to the change above.
+  const acceptHeader = (headersForAxios as Record<string, string>)?.['Accept']?.toLowerCase();
   if (acceptHeader === 'text/event-stream') {
     axiosConfig.responseType = 'stream';
   }
